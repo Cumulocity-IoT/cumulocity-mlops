@@ -1,0 +1,126 @@
+/**
+* This application queries a separate microservice (machine learning)
+* to make predictions based on the Activity Recognition use case in the
+* documentation. However, instead of Zementis, it now queries an ONNX RunTime Microservice.
+*/
+
+using com.apama.cumulocity.CumulocityRequestInterface;
+using com.apama.correlator.Component;
+using com.apama.cumulocity.Alarm;
+using com.apama.cumulocity.Event;
+using com.apama.cumulocity.Measurement;
+using com.apama.cumulocity.FindManagedObjectResponse;
+using com.apama.cumulocity.FindManagedObjectResponseAck;
+using com.apama.cumulocity.FindManagedObject;
+using com.softwareag.connectivity.httpclient.HttpOptions;
+using com.softwareag.connectivity.httpclient.HttpTransport;
+using com.softwareag.connectivity.httpclient.Request;
+using com.softwareag.connectivity.httpclient.Response;
+using com.apama.json.JSONPlugin;
+
+/**
+* Call another microservice
+*/
+monitor DetectAnomalies {
+
+	CumulocityRequestInterface requestIface;
+
+	action onload() {
+		requestIface := CumulocityRequestInterface.connectToCumulocity();
+		// Replace yourDeviceId with the value of your device id
+		string yourDeviceId:= "212053";
+		listenAndActOnMeasurements(yourDeviceId, "specific-onnx-1");
+	}
+
+	action listenAndActOnMeasurements(string deviceId, string modelName)
+	{
+		//Subscribe to the Measurement Channel of your device
+		monitor.subscribe(Measurement.SUBSCRIBE_CHANNEL);
+
+		on all Measurement(source = deviceId) as m {
+			if (m.measurements.hasKey("c8y_Acceleration")) {
+				log "Received measurement" at INFO;
+				dictionary < string, any > RECORD:= convertMeasurementToRecord(m);
+				log "Sending record to ONNX RunTime - " + JSONPlugin.toJSON(RECORD) at INFO;
+				
+				//Define the Root of your ONNX Microservice
+				string REQUEST_ROOT:= "/service/specific-onnx-1/predict";
+				
+				
+				Request onnxRequest:=
+					requestIface.createRequest("POST", REQUEST_ROOT, RECORD);
+
+				//onnxRequest.setQueryParameter(QUERY_PARAM, RECORD);
+				onnxRequest.execute(onnxHandler(deviceId).requestHandler);
+				
+				log "EPL execution completed." at INFO;
+			}
+		}
+	}
+
+	action convertMeasurementToRecord(com.apama.cumulocity.Measurement m)
+	returns dictionary < string, any >
+	{
+		dictionary < string, any > json := { };
+		json["accelerationX"] := m.measurements.
+			getOrDefault("c8y_Acceleration").
+			getOrDefault("accelerationX").value;
+		json["accelerationY"] := m.measurements.
+			getOrDefault("c8y_Acceleration").
+			getOrDefault("accelerationY").value;
+		json["accelerationZ"] := m.measurements.
+			getOrDefault("c8y_Acceleration").
+			getOrDefault("accelerationZ").value;
+
+		
+		dictionary < string, any > inputs := {"inputs":json};
+		return inputs;
+		//return JSONPlugin.toJSON(inputs);
+	}
+
+
+	event onnxHandler
+	{
+		string deviceId;
+		action requestHandler(Response onnxResponse)
+		{
+			integer statusCode:= onnxResponse.statusCode;
+			if (statusCode = 200)
+			{
+				dictionary<string, any> outputs := {};
+				
+				//extract the results from the Output payload from the response.
+				//Since it is a sequence<sequence<float>> response, the float prediction value needs to be extracted from the response
+				any myresult := onnxResponse.payload.data.getEntry("output");
+				sequence<any> extract1 := <sequence<any>> myresult;
+				sequence<any> extract2 := <sequence<any>> extract1[0];
+				float extract3 := <float> extract2[0];
+				outputs["probability"] := extract3;
+				
+				//Perform a logic to differentiate Moving and Sitting labels
+				string label;
+				if(extract3>0.95){
+					label := "MOVING";
+				}
+				else{
+					label := "SITTING";
+				}
+
+				//Create an Event with the Probability value
+				//TODO More logics can be defined here: E.g. if Probability value is higher than 0.9, the activity is moving"
+				send Event("",
+						"ActivityRecognitionEvent",
+						deviceId,
+						currentTime,
+						"Activity Recognized as "+label,
+						outputs) to Event.SEND_CHANNEL;
+			} 
+			else
+			{
+				log "onnx response :" +
+					onnxResponse.payload.data.toString()
+					at INFO;
+			}
+		}
+	}
+}
