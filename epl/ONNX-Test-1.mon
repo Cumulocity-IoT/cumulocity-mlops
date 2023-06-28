@@ -17,26 +17,41 @@ using com.softwareag.connectivity.httpclient.HttpTransport;
 using com.softwareag.connectivity.httpclient.Request;
 using com.softwareag.connectivity.httpclient.Response;
 using com.apama.json.JSONPlugin;
+using com.apama.aggregates.avg; 
+using com.apama.aggregates.last;
+
 
 /**
 * Call another microservice
 */
 monitor DetectAnomalies {
-
-	CumulocityRequestInterface requestIface;
-
-	action onload() {
-		requestIface := CumulocityRequestInterface.connectToCumulocity();
-		// Replace yourDeviceId with the value of your device id
-		string yourDeviceId:= "212053";
-		listenAndActOnMeasurements(yourDeviceId, "specific-onnx-1");
+	event AccelerationAverageByDevice {
+		string source;
+		float avgX_Value;
+		float avgY_Value;
+		float avgZ_Value;
+		string unit;
 	}
 
-	action listenAndActOnMeasurements(string deviceId, string modelName)
+	CumulocityRequestInterface request;
+
+	//Define the Root of your ONNX Microservice
+	string REQUEST_ROOT:= "/service/specific-onnx-1/predict";
+
+	action onload() {
+		request := CumulocityRequestInterface.connectToCumulocity();
+		// Replace yourDeviceId with the value of your device id
+		// not used at the moment
+		// string yourDeviceId:= "4458572501";
+
+		listenAndScoreMeasurements();
+	}
+
+	action listenAndScoreMeasurements()
 	{
 		//Subscribe to the Measurement Channel of your device
 		monitor.subscribe(Measurement.SUBSCRIBE_CHANNEL);
-
+		/*
 		on all Measurement(source = deviceId) as m {
 			if (m.measurements.hasKey("c8y_Acceleration")) {
 				log "Received measurement" at INFO;
@@ -48,7 +63,7 @@ monitor DetectAnomalies {
 				
 				
 				Request onnxRequest:=
-					requestIface.createRequest("POST", REQUEST_ROOT, RECORD);
+					request.createRequest("POST", REQUEST_ROOT, RECORD);
 
 				//onnxRequest.setQueryParameter(QUERY_PARAM, RECORD);
 				onnxRequest.execute(onnxHandler(deviceId).requestHandler);
@@ -56,7 +71,43 @@ monitor DetectAnomalies {
 				log "EPL execution completed." at INFO;
 			}
 		}
+		*/
+
+		from m in all Measurement(type="c8y_Acceleration") within (5.0) every 2.5
+		group by m.source select
+			AccelerationAverageByDevice(m.source,
+			avg(m.measurements["c8y_Acceleration"]["accelerationX"].value),
+			avg(m.measurements["c8y_Acceleration"]["accelerationY"].value),
+			avg(m.measurements["c8y_Acceleration"]["accelerationZ"].value),
+			last(m.measurements["c8y_Acceleration"]["accelerationZ"].unit)) as avgdata {
+
+				log "Received measurement" at INFO;
+				dictionary < string, any > record:= convertAVGRecordToRecord(avgdata);
+				log "Sending record to ONNX RunTime - " + JSONPlugin.toJSON(record) at INFO;
+						
+				Request onnxRequest:=
+					request.createRequest("POST", REQUEST_ROOT, record);
+
+				onnxRequest.execute(onnxHandler(avgdata.source).requestHandler);
+				
+				log "EPL execution completed." at INFO;
+			}
+			
 	}
+
+	action convertAVGRecordToRecord(AccelerationAverageByDevice m)
+	returns dictionary < string, any >
+	{
+		dictionary < string, any > json := { };
+		json["accelerationX"] := m.avgX_Value;
+		json["accelerationY"] := m.avgY_Value;
+		json["accelerationZ"] := m.avgZ_Value;
+
+		dictionary < string, any > inputs := {"inputs":json};
+		return inputs;
+		//return JSONPlugin.toJSON(inputs);
+	}
+
 
 	action convertMeasurementToRecord(com.apama.cumulocity.Measurement m)
 	returns dictionary < string, any >
@@ -109,7 +160,7 @@ monitor DetectAnomalies {
 				//Create an Event with the Probability value
 				//TODO More logics can be defined here: E.g. if Probability value is higher than 0.9, the activity is moving"
 				send Event("",
-						"ActivityRecognitionEvent",
+						"c8y_ActivityRecognitionEvent",
 						deviceId,
 						currentTime,
 						"Activity Recognized as "+label,

@@ -24,7 +24,7 @@ def healthjson():
 
 
 # Load the ONNX model from a URL
-sess = rt.InferenceSession("model/onnx-model/cumulocity_classification_model_3.onnx")
+sess = rt.InferenceSession("model/onnx-model/model.onnx")
 
 # Define an API endpoint that will receive input data from a client
 

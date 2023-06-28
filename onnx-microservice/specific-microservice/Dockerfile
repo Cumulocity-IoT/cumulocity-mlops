@@ -2,7 +2,7 @@ FROM python:3.8-slim-buster
 
 #Copy the application.py file and the ONNX Model file
 COPY application.py /
-COPY model/ /model/
+COPY model/onnx-model/acceleration_model.onnx /model/onnx-model/model.onnx
 
 #Install necessary libraries
 RUN apt-get update && \
