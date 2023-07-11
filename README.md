@@ -1,5 +1,5 @@
 # cumulocity-mlops
-This repo outlines the steps required for a complete AI/ML cycle:
+This repo outlines the steps required for a complete AI/ML cycle. In involves Cumulocity IoT with the addintional components DataHub for offloading the process data:
 1. Export data through DataHub to AWS S3
 2. Locate Data in AWS S3
 3. Train Model in AWS SageMaker and export in ONNX format
@@ -24,6 +24,7 @@ They can they can be viewed in the following diragram:
 
 ![AIML_Scoring_Results](./resources/AIML_Scoring_Results.png)
 
+The out-of-the box extension points, e.g. Cumulocity Microservices & DataHub allow to adapt this solution to your AI/ML requirements.
 
 # Import data using c8y tool
 
