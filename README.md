@@ -7,7 +7,8 @@ This repo outlines the steps required for a complete AI/ML cycle:
 5. Deploy Ananlytics EPL App for scoring
 6. Scoring results
 
-They can they can be viewed in the following diragram
+They can they can be viewed in the following diragram:
+
 ![AIML_Architecture](./resources/AIML_Architecture.png)
 
 
